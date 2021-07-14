@@ -8,7 +8,7 @@ import tqdm
 import numpy as np
 import pandas as pd
 from sklearn import preprocessing
-import pdb
+#:import pdb
 
 import torch
 import torch.nn as nn
@@ -78,8 +78,14 @@ def get_parameters():
 
     model_config_path = args.model_config_path
     dataset_config_path = args.dataset_config_path
-    pdb.set_trace()
-    config.read(dataset_config_path, encoding="utf-8")
+
+    print("Model config path: ", model_config_path, " -- dataset config path: ", dataset_config_path)
+
+    print("--"*4)
+
+    #pdb.set_trace()
+    dump_flag = config.read(dataset_config_path, encoding="utf-8")
+    print("Config.read status: ", dump_flag)
 
     dataset = ConfigSectionMap('data')['dataset']
     time_intvl = int(ConfigSectionMap('data')['time_intvl'])
