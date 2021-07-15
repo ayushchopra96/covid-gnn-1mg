@@ -36,7 +36,7 @@ def set_seed(seed):
 def worker_init_fn(worker_id):
     set_seed(worker_id)
 
-def get_parameters():
+def get_parameters(n_his,Kt,time_intvl, stblock_num ):
     parser = argparse.ArgumentParser(description='STGCN for road traffic prediction')
     parser.add_argument('--enable_cuda', type=bool, default='True',
                         help='enable CUDA, default as True')
@@ -88,10 +88,10 @@ def get_parameters():
     print("Config.read status: ", dump_flag)
 
     dataset = ConfigSectionMap('data')['dataset']
-    time_intvl = int(ConfigSectionMap('data')['time_intvl'])
-    n_his = int(ConfigSectionMap('data')['n_his'])
-    Kt = int(ConfigSectionMap('data')['kt'])
-    stblock_num = int(ConfigSectionMap('data')['stblock_num'])
+#     time_intvl = int(ConfigSectionMap('data')['time_intvl'])
+#     n_his = int(ConfigSectionMap('data')['n_his'])
+#     Kt = int(ConfigSectionMap('data')['kt'])
+#     stblock_num = int(ConfigSectionMap('data')['stblock_num'])
     if ((Kt - 1) * 2 * stblock_num > n_his) or ((Kt - 1) * 2 * stblock_num <= 0):
         raise ValueError(f'ERROR: {Kt} and {stblock_num} are unacceptable.')
     Ko = n_his - (Kt - 1) * 2 * stblock_num
@@ -236,7 +236,7 @@ def train(loss, epochs, optimizer, scheduler, early_stopping, model, model_save_
             scheduler.step()
             l_sum += l.item() * y.shape[0]
             n += y.shape[0]
-        val_loss = val(model, val_iter)
+        val_loss = val(model, val_iter, loss)
         if val_loss < min_val_loss:
             min_val_loss = val_loss
         early_stopping(val_loss, model)
@@ -249,8 +249,9 @@ def train(loss, epochs, optimizer, scheduler, early_stopping, model, model_save_
             print("Early stopping.")
             break
     print('\nTraining finished.\n')
+    return l_sum / n, val_loss
 
-def val(model, val_iter):
+def val(model, val_iter, loss):
     model.eval()
     l_sum, n = 0.0, 0
     with torch.no_grad():
@@ -261,7 +262,7 @@ def val(model, val_iter):
             n += y.shape[0]
         return l_sum / n
     
-def test(zscore, loss, model, test_iter):
+def test(zscore, loss, model, test_iter, model_save_path):
     best_model = model
     best_model.load_state_dict(torch.load(model_save_path))
     test_MSE = utility.evaluate_model(best_model, loss, test_iter)
@@ -270,9 +271,9 @@ def test(zscore, loss, model, test_iter):
     #print(f'MAE {test_MAE:.6f} | MAPE {test_MAPE:.8f} | RMSE {test_RMSE:.6f}')
     test_MAE, test_RMSE, test_WMAPE = utility.evaluate_metric(best_model, test_iter, zscore)
     print(f'MAE {test_MAE:.6f} | RMSE {test_RMSE:.6f} | WMAPE {test_WMAPE:.8f}')
+    return test_MSE, test_MAE, test_RMSE, test_WMAPE
 
-if __name__ == "__main__":
-    # For stable experiment results
+def create_experiments(exp_no, n_his, n_pred, Kt,time_intvl, stblock_num ,scalar_point):
     SEED = 1608825600
     set_seed(SEED)
 
@@ -284,12 +285,16 @@ if __name__ == "__main__":
     #logging.basicConfig(filename='stgcn.log', level=logging.INFO)
     logging.basicConfig(level=logging.INFO)
 
-    device, n_his, n_pred, day_slot, model_save_path, data_path, n_vertex, batch_size, drop_rate, opt, epochs, graph_conv_type, model, learning_rate, weight_decay_rate, step_size, gamma = get_parameters()
+    device, n_his, n_pred, day_slot, model_save_path, data_path, n_vertex, batch_size, drop_rate, opt, epochs, graph_conv_type, model, learning_rate, weight_decay_rate, step_size, gamma = get_parameters(n_his,Kt,time_intvl, stblock_num )
     zscore, train_iter, val_iter, test_iter = data_preparate(data_path, device, n_his, n_pred, day_slot, batch_size)
     loss, early_stopping, optimizer, scheduler = main(learning_rate, weight_decay_rate, graph_conv_type, model_save_path, model, n_his, n_vertex, step_size, gamma, opt)
 
     # Training
-    train(loss, epochs, optimizer, scheduler, early_stopping, model, model_save_path, train_iter, val_iter)
+    train_loss, val_loss = train(loss, epochs, optimizer, scheduler, early_stopping, model, model_save_path, train_iter, val_iter)
 
     # Testing
-    test(zscore, loss, model, test_iter)
+    test_MSE, test_MAE, test_RMSE, test_WMAPE = test(zscore, loss, model, test_iter, model_save_path)
+    
+    df = pd.DataFrame({'data_point': [scalar_point],'n_his': [n_his], 'n_pred': n_pred, 'n_vertex':[n_vertex], 'train_loss':[train_loss], 'val_loss':[val_loss], 'test_loss':[test_MSE], 'test_MAE': [test_MAE], 'test_RMSE': [test_RMSE], 'test_WMAPE': [test_WMAPE]})
+    
+    df.to_csv('Exp_results/{}.csv'.format(exp_no))
